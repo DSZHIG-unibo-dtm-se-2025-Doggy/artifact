@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 
 def test_router_predict(monkeypatch):
-    # Avoid real model loading/token checks
     monkeypatch.setenv("HF_TOKEN", "dummy-token")
 
     class FakeDogModel:
@@ -21,9 +20,19 @@ def test_router_predict(monkeypatch):
         def generate_advice(self, breed: str):
             return f"Advice for {breed}"
 
-    # Patch classes before importing router so its globals use stubs
+    # Убираем кеши, где могли быть реальные импорты
+    for mod in list(sys.modules):
+        if mod.startswith("Features.") or mod.startswith("backend.Features."):
+            sys.modules.pop(mod)
+
+    # Патчим оба пути импортов
     monkeypatch.setattr(
         "Features.DogRecognition.dog_recognition.DogRecognitionModel",
+        FakeDogModel,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "backend.Features.DogRecognition.dog_recognition.DogRecognitionModel",
         FakeDogModel,
         raising=False,
     )
@@ -32,17 +41,15 @@ def test_router_predict(monkeypatch):
         FakeLLM,
         raising=False,
     )
-
-    # Drop cached modules to ensure patched imports are used
-    for mod in list(sys.modules):
-        if mod.startswith("Features.") or mod.startswith("backend.Features."):
-            sys.modules.pop(mod)
+    monkeypatch.setattr(
+        "backend.Features.LLM.llm_engine.DogLLMEngine",
+        FakeLLM,
+        raising=False,
+    )
 
     import backend.Core.router as router
-
     importlib.reload(router)
 
-    # Also replace instances on the router if already created
     router.ml_model = FakeDogModel()
     router.llm_engine = FakeLLM()
 
